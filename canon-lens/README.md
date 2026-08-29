@@ -21,8 +21,16 @@
 ```bash
 python -m canon_lens.cli check <файл> [--canon canon.md] [--json]
 # из корня репозитория:
-python canon-lens/tests/test_example01.py      # мини-тест приёмки, одна строка PASS/FAIL
+python canon-lens/tests/test_example01.py   # synthetic-канон против examples/01 → PASS 7/7
+python canon-lens/tests/test_sostav.py      # канон Тимура: плохой черновик ловится, хороший чист → PASS 9/9
 ```
+
+Два канона в репо:
+- `canon.md` — synthetic, под приёмку `examples/`;
+- `canon.sostav.md` — клубный блог AI Practiq, собран из 3 статей Тимура
+  (структура: лид, блок кейса, FAQ, SEO-ключ в лиде, 1–2 CTA на клуб).
+
+Смена канона = смена файла `--canon`, код не меняется.
 
 Код возврата `check`: `1` если есть нарушения `severity=error`, иначе `0`.
 

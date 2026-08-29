@@ -142,6 +142,8 @@ def _k_headline(text, rule):
     if not m:
         return []
     title = m.group(1)
+    if any(title.startswith(pfx) for pfx in rule.allow):   # имя собственное в начале — ок
+        return []
     first_alpha = next((c for c in title if c.isalpha()), "")
     if first_alpha and first_alpha == first_alpha.upper():
         s = m.start(1)
@@ -190,6 +192,49 @@ def _k_number(text, rule):
     return res
 
 
+def _doc_violation(rule, quote, message=None):
+    """нарушение уровня документа — без конкретного места (отсутствие / счёт)."""
+    return Violation(
+        rule=rule.id, point=rule.point, category=rule.category, severity=rule.severity,
+        kind="redaction" if rule.category == "redaction" else "mechanical",
+        line=1, col=1, end_col=1, offset=[0, 0], quote=quote,
+        message=message or rule.message, fix=rule.fix,
+    )
+
+
+def _k_require_present(text, rule):
+    if any(re.search(p, text) for p in rule.patterns):
+        return []
+    return [_doc_violation(rule, "— не найдено —")]
+
+
+def _k_require_in_lead(text, rule):
+    within = rule.within or 500
+    lead = text[:within]
+    if any(re.search(p, lead) for p in rule.patterns):
+        return []
+    return [_doc_violation(rule, f"— нет в первых {within} знаках —")]
+
+
+def _k_keyword_min_count(text, rule):
+    if not rule.keyword or rule.min is None:
+        return []
+    n = len(re.findall(re.escape(rule.keyword), text, re.IGNORECASE))
+    if n < rule.min:
+        return [_doc_violation(rule, f"{n}×", f"{rule.message}: {n} из нужных {rule.min}")]
+    return []
+
+
+def _k_count_range(text, rule):
+    n = sum(len(re.findall(p, text)) for p in rule.patterns)
+    lo = rule.min if rule.min is not None else 0
+    hi = rule.max if rule.max is not None else 10 ** 9
+    if lo <= n <= hi:
+        return []
+    rng = str(lo) if lo == hi else f"{lo}–{hi if hi < 10**9 else '∞'}"
+    return [_doc_violation(rule, f"{n}×", f"{rule.message}: {n}, нужно {rng}")]
+
+
 _DISPATCH = {
     "emoji": _k_emoji,
     "regex_forbidden": _k_regex,
@@ -200,4 +245,8 @@ _DISPATCH = {
     "paragraph_max_lines": _k_par_lines,
     "doc_max_chars": _k_doc_chars,
     "number_without_source": _k_number,
+    "require_present": _k_require_present,
+    "require_in_lead": _k_require_in_lead,
+    "keyword_min_count": _k_keyword_min_count,
+    "count_range": _k_count_range,
 }

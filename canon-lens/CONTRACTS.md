@@ -41,13 +41,28 @@ max      = 1200             # paragraph_max_lines | doc_max_chars
 | `stem_forbidden` | `stems[]` | слово, начинающееся с основы |
 | `phrase_forbidden` | `phrases[]` | буквальная фраза (регистронезависимо) |
 | `form_forbidden` | `forms[]` | точная словоформа |
-| `headline_case` | — | первый `#`-заголовок не со строчной буквы |
+| `headline_case` | `allow[]` (префиксы-исключения) | первый `#`-заголовок не со строчной буквы |
 | `paragraph_max_lines` | `max` | абзац длиннее `max` строк |
 | `doc_max_chars` | `max` | документ длиннее `max` знаков |
 | `number_without_source` | — | число в строке без `(…)` рядом |
+| `require_present` | `patterns[]` | нарушение, если НИ ОДИН паттерн не встретился |
+| `require_in_lead` | `patterns[]`, `within` (знаков, деф. 500) | нет ни одного паттерна в первых `within` знаках |
+| `keyword_min_count` | `keyword`, `min` | `keyword` встречается меньше `min` раз |
+| `count_range` | `patterns[]`, `min`, `max` | число совпадений вне `[min, max]` |
+
+`require_*` и `count_range` дают запись **уровня документа**: `offset=[0,0]`,
+`line=1`, `col=1`, `quote` = маркер (`«— не найдено —»`, `«3×»`).
 
 Новый вид правила = код в `canon_lens/check.py` (`_DISPATCH`). Всё остальное —
 данными.
+
+### Несколько канонов
+
+Один модуль — сколько угодно канон-файлов. В репо два:
+`canon.md` (synthetic, приёмка `examples/`) и `canon.sostav.md` (клубный блог
+AI Practiq из 3 статей Тимура — структурные требования: лид, блок кейса, FAQ,
+SEO-ключ в лиде, 1–2 CTA на клуб; «подписывайтесь» здесь разрешено).
+`check --canon <файл>` — поведение целиком из файла, код не меняется.
 
 ---
 

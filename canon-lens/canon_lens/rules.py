@@ -19,10 +19,14 @@ KINDS = {
     "stem_forbidden",        # слово, начинающееся с любого stem — нарушение
     "phrase_forbidden",      # буквальная фраза (регистронезависимо)
     "form_forbidden",        # точная словоформа
-    "headline_case",         # первый заголовок должен начинаться со строчной
+    "headline_case",         # первый заголовок должен начинаться со строчной (allow: префиксы-исключения)
     "paragraph_max_lines",   # абзац длиннее max строк (param: max)
     "doc_max_chars",         # документ длиннее max знаков (param: max)
     "number_without_source", # число в утверждении без «(источник)» рядом
+    "require_present",        # нарушение, если НИ ОДИН pattern не встретился в тексте
+    "require_in_lead",        # нарушение, если НИ ОДИН pattern не встретился в первых `within` знаках
+    "keyword_min_count",      # keyword встречается меньше `min` раз
+    "count_range",            # число совпадений patterns вне диапазона [min, max]
 }
 
 
@@ -39,7 +43,11 @@ class Rule:
     stems: list[str] = field(default_factory=list)
     phrases: list[str] = field(default_factory=list)
     forms: list[str] = field(default_factory=list)
+    allow: list[str] = field(default_factory=list)   # префиксы-исключения (headline_case)
     max: int | None = None
+    min: int | None = None
+    within: int | None = None                        # окно «лида» в знаках (require_in_lead)
+    keyword: str = ""
     judgment_extends: bool = False   # буквальное ловим здесь, вариации — модуль judge/
     note: str = ""
 
@@ -78,7 +86,10 @@ def _from_toml(data: dict) -> Canon:
             message=d.get("message", ""), fix=d.get("fix", ""),
             patterns=d.get("patterns", []), stems=d.get("stems", []),
             phrases=d.get("phrases", []), forms=d.get("forms", []),
-            max=d.get("max"), judgment_extends=d.get("judgment_extends", False),
+            allow=d.get("allow", []),
+            max=d.get("max"), min=d.get("min"), within=d.get("within"),
+            keyword=d.get("keyword", ""),
+            judgment_extends=d.get("judgment_extends", False),
             note=d.get("note", ""),
         ))
     return Canon(meta=data.get("meta", {}), rules=rules)
