@@ -14,21 +14,50 @@ PAIN = ("теря", "пропада", "не найти", "вручную", "ру
         "уходит", "забыт", "не понима", "барьер", "ошиб", "долго", "недел")
 USABLE = ("number", "claim", "action", "quote")
 MIN_FACTS = 2
-FALLBACK_CTA = "возьмите один процесс из своей недели и опишите его словами"
 
 # Рилз меряется секундами речи, а не знаками: канон ограничивает пост в знаках,
 # но в тридцать секунд разговорного темпа влезает примерно 75 слов.
 WORDS_PER_SEC = 2.5
 LIMITS = (("хук", 3.0), ("суть", 19.0), ("cta", 8.0))
 
+# 30 секунд — потолок отказа, а не цель. Внешние источники (docs/reels-craft.md)
+# сходятся на 7–15 с как лучшем, с оговоркой про удержание; целевым коридором
+# для упаковки статьи берём 15–20 с — там уже есть что сказать, но ролик ещё
+# зацикливается.
+TARGET = (15.0, 20.0)
+
+# CTA, бьющие по сигналам ранжирования: отправка — самый сильный из названных.
+CTA_SHARE = "отправьте это тому, кто делает то же самое руками"
+FALLBACK_CTA = "возьмите один процесс из своей недели и опишите его словами"
+
 
 def seconds(text):
     return round(len(text.split()) / WORDS_PER_SEC, 1)
 
 
+STOP = {"это", "как", "что", "для", "при", "все", "уже", "его", "она", "они",
+        "или", "над", "под", "без", "два", "три", "той", "тот", "чем", "так"}
+
+
 def numbers_of(fact):
     return set(re.findall(r"\d+",
                           fact.get("text", "") + " " + str(fact.get("value") or "")))
+
+
+def content_words(fact):
+    words = re.findall(r"[а-яёa-z]{3,}", fact.get("text", "").lower())
+    return {w for w in words if w not in STOP}
+
+
+def repeats(fact, seen_numbers, seen_words):
+    """Факт уже прозвучал: его числа целиком известны, либо половина значимых
+    слов совпадает с уже сказанным. Одних чисел мало — «за 15 минут» и
+    «за 15-20 минут» дают разные множества, а для зрителя это один факт."""
+    digits = numbers_of(fact)
+    if digits and digits <= seen_numbers:
+        return True
+    words = content_words(fact)
+    return bool(words) and len(words & seen_words) / len(words) >= 0.5
 
 
 class Refusal(Exception):
@@ -45,7 +74,7 @@ def _pain_score(fact):
     return sum(1 for marker in PAIN if marker in text)
 
 
-def pick(facts):
+def pick(facts, title=""):
     """Хук, 2-3 факта в суть, действие для CTA."""
     usable = [f for f in facts if f.get("kind") in USABLE]
     if len(usable) < MIN_FACTS:
@@ -58,27 +87,46 @@ def pick(facts):
     # Хук — про боль и обязан влезть в свои три секунды: длинный хук зритель
     # не дослушивает. Из подходящих берём самый короткий.
     hook_limit = LIMITS[0][1]
-    painful = [f for f in rest if _pain_score(f) > 0] or \
-              [f for f in rest if f.get("kind") == "number"] or rest or usable
-    fitting = [f for f in painful if seconds(f["text"]) <= hook_limit]
-    hook = min(fitting or painful, key=lambda f: (-_pain_score(f), seconds(f["text"]))) \
-        if fitting else min(painful, key=lambda f: seconds(f["text"]))
 
-    candidates = [f for f in rest if f["id"] != hook["id"]]
+    # Хук, пересказывающий заголовок статьи, — это титульная карточка: тот самый
+    # slow intro, который источники называют антипаттерном прямым текстом.
+    title_words = {w for w in re.findall(r"[а-яёa-z]{3,}", title.lower())
+                   if w not in STOP}
+
+    def is_title_card(fact):
+        words = content_words(fact)
+        return bool(words) and len(words & title_words) / len(words) >= 0.5
+
+    fresh = [f for f in rest if not is_title_card(f)] or rest
+    painful = [f for f in fresh if _pain_score(f) > 0] or \
+              [f for f in fresh if f.get("kind") == "number"] or fresh or usable
+    # сначала ищем среди болевых, потом среди любых свежих — короткий хук
+    # важнее идеального: первые три секунды решают, досмотрят ли вообще
+    def usable_hook(fact):
+        # «Шаг 3» влезает в лимит, но хуком не является: в хуке должно быть
+        # сказано что-то, а не подписан пункт списка
+        return seconds(fact["text"]) <= hook_limit and len(content_words(fact)) >= 3
+
+    fitting = ([f for f in painful if usable_hook(f)] or
+               [f for f in fresh if usable_hook(f)])
+    hook = (max(fitting, key=lambda f: (_pain_score(f), -seconds(f["text"])))
+            if fitting else min(painful, key=lambda f: seconds(f["text"])))
+
+    candidates = [f for f in fresh if f["id"] != hook["id"]]
     candidates.sort(key=lambda f: (f.get("kind") != "number", f["id"]))
 
     # Факт, чьи числа целиком уже прозвучали, ничего не добавляет: три пункта
     # про одни и те же 80 уроков читаются как повтор, а не как три факта.
-    seen = numbers_of(hook)
+    seen, seen_words = numbers_of(hook), content_words(hook)
     body, budget = [], LIMITS[1][1]
     for fact in candidates:
-        digits = numbers_of(fact)
-        if digits and digits <= seen:
+        if repeats(fact, seen, seen_words):
             continue
         cost = seconds(fact["text"])
         if body and budget - cost < 0:      # в суть больше не влезает
             break
-        seen |= digits
+        seen |= numbers_of(fact)
+        seen_words |= content_words(fact)
         budget -= cost
         body.append(fact)
         if len(body) == 3:
@@ -119,7 +167,7 @@ def render(data, canon):
     facts = data.get("facts", [])
     source = data.get("source", {})
     source_id = source.get("id", "источник")
-    hook, body, action = pick(facts)
+    hook, body, action = pick(facts, source.get("title", ""))
 
     # заголовок начинается со слова «сценарий», поэтому строчная буква по п.2
     # обеспечена и без порчи имён собственных внутри названия статьи
@@ -130,12 +178,20 @@ def render(data, canon):
               _with_source(fit_hook(hook["text"].rstrip(".")), source_id,
                            lens.needs_number_source(canon)) + ".",
               ""]
+    # Суть — речь, а не список. Маркированные пункты читаются как перечисление,
+    # и заказчик такой текст переписывает: это провал теста на голос. Факты те
+    # же и в том же порядке, меняется только форма подачи.
     lines += ["## суть (3–22 с)", ""]
-    for fact in body:
-        lines.append("- " + _with_source(fact["text"].rstrip("."), source_id,
-                                         lens.needs_number_source(canon)) + ".")
+    said = [_with_source(fact["text"].rstrip("."), source_id,
+                         lens.needs_number_source(canon)) for fact in body]
+    lines.append(". ".join(s[0].upper() + s[1:] if s else s for s in said) + ".")
     lines += ["", "## cta (22–30 с)", ""]
     cta = action["text"].rstrip(".") if action else FALLBACK_CTA
+    # призыв к отправке добавляем, только если ролик остаётся в целевом коридоре:
+    # сильный сигнал ранжирования не стоит того, чтобы вылезти за 20 секунд
+    spent = seconds(" ".join(lines[2:]))
+    if spent + seconds(cta + " " + CTA_SHARE) <= TARGET[1]:
+        cta = cta + ". " + CTA_SHARE
     lines += [cta + ".", ""]
     used = [hook["id"]] + [f["id"] for f in body] + ([action["id"]] if action else [])
     lines += ["## использованные факты", "", ", ".join(used), ""]
@@ -215,7 +271,15 @@ def report(data, canon, script=None, used=None, refusal=None, template_cta=False
             total += secs
             mark = "" if secs <= limit else f" — превышение, лимит {limit} с"
             out.append(f"- {name}: {secs} с{mark}")
-        out.append(f"- всего: {round(total, 1)} с при темпе {WORDS_PER_SEC} слова в секунду")
+        total = round(total, 1)
+        low, high = TARGET
+        if total < low:
+            fit = f" — короче целевого коридора {low}–{high} с"
+        elif total > high:
+            fit = f" — длиннее целевого коридора {low}–{high} с"
+        else:
+            fit = f" — в целевом коридоре {low}–{high} с"
+        out.append(f"- всего: {total} с{fit}, при темпе {WORDS_PER_SEC} слова в секунду")
         out.append("")
 
         out += ["## самопроверка сценария", ""]
