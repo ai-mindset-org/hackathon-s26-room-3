@@ -16,6 +16,20 @@ USABLE = ("number", "claim", "action", "quote")
 MIN_FACTS = 2
 FALLBACK_CTA = "возьмите один процесс из своей недели и опишите его словами"
 
+# Рилз меряется секундами речи, а не знаками: канон ограничивает пост в знаках,
+# но в тридцать секунд разговорного темпа влезает примерно 75 слов.
+WORDS_PER_SEC = 2.5
+LIMITS = (("хук", 3.0), ("суть", 19.0), ("cta", 8.0))
+
+
+def seconds(text):
+    return round(len(text.split()) / WORDS_PER_SEC, 1)
+
+
+def numbers_of(fact):
+    return set(re.findall(r"\d+",
+                          fact.get("text", "") + " " + str(fact.get("value") or "")))
+
 
 class Refusal(Exception):
     """Штатный отказ: сценарий не собирается, причина уходит в отчёт."""
@@ -41,18 +55,58 @@ def pick(facts):
     actions = [f for f in usable if f.get("kind") == "action"]
     rest = [f for f in usable if f not in actions]
 
-    hook = max(rest, key=_pain_score) if rest else usable[0]
-    if _pain_score(hook) == 0:
-        numbers = [f for f in rest if f.get("kind") == "number"]
-        hook = numbers[0] if numbers else rest[0]
+    # Хук — про боль и обязан влезть в свои три секунды: длинный хук зритель
+    # не дослушивает. Из подходящих берём самый короткий.
+    hook_limit = LIMITS[0][1]
+    painful = [f for f in rest if _pain_score(f) > 0] or \
+              [f for f in rest if f.get("kind") == "number"] or rest or usable
+    fitting = [f for f in painful if seconds(f["text"]) <= hook_limit]
+    hook = min(fitting or painful, key=lambda f: (-_pain_score(f), seconds(f["text"]))) \
+        if fitting else min(painful, key=lambda f: seconds(f["text"]))
 
-    body = [f for f in rest if f["id"] != hook["id"]]
-    body.sort(key=lambda f: (f.get("kind") != "number", f["id"]))
-    body = body[:3]
+    candidates = [f for f in rest if f["id"] != hook["id"]]
+    candidates.sort(key=lambda f: (f.get("kind") != "number", f["id"]))
+
+    # Факт, чьи числа целиком уже прозвучали, ничего не добавляет: три пункта
+    # про одни и те же 80 уроков читаются как повтор, а не как три факта.
+    seen = numbers_of(hook)
+    body, budget = [], LIMITS[1][1]
+    for fact in candidates:
+        digits = numbers_of(fact)
+        if digits and digits <= seen:
+            continue
+        cost = seconds(fact["text"])
+        if body and budget - cost < 0:      # в суть больше не влезает
+            break
+        seen |= digits
+        budget -= cost
+        body.append(fact)
+        if len(body) == 3:
+            break
     if not body:
         raise Refusal("после выбора хука не осталось фактов для сути")
 
     return hook, body, (actions[0] if actions else None)
+
+
+def fit_hook(text, limit=None):
+    """Укоротить хук до лимита, отрезая по границе части предложения.
+
+    Слова берутся только из самого факта, ничего не дописывается — то есть
+    гарантия «сборщик не выдумывает» не нарушается. Если укоротить нечем,
+    возвращаем как есть: превышение честнее подрезанной бессмыслицы.
+    """
+    limit = LIMITS[0][1] if limit is None else limit
+    if seconds(text) <= limit:
+        return text
+    parts = re.split(r"\s*[,;—–-]\s+", text)
+    best = ""
+    for part in parts:
+        candidate = (best + ", " + part) if best else part
+        if seconds(candidate) > limit:
+            break
+        best = candidate
+    return best if len(best.split()) >= 3 else text
 
 
 def _with_source(line, source_id, need_source):
@@ -73,7 +127,8 @@ def render(data, canon):
 
     lines = [f"# сценарий: {title}", ""]
     lines += ["## хук (0–3 с)", "",
-              _with_source(hook["text"].rstrip("."), source_id, lens.needs_number_source(canon)) + ".",
+              _with_source(fit_hook(hook["text"].rstrip(".")), source_id,
+                           lens.needs_number_source(canon)) + ".",
               ""]
     lines += ["## суть (3–22 с)", ""]
     for fact in body:
@@ -118,13 +173,29 @@ def source_violations(facts, canon):
     return lens.check(quotes, canon, document_level=False)
 
 
-def report(data, canon, script=None, used=None, refusal=None, template_cta=False):
+def timing(script):
+    """Секунды речи по блокам. Возвращает [(блок, секунды, лимит)]."""
+    blocks, current = {}, None
+    for line in USED_SECTION.sub("", script).split("\n"):
+        if line.startswith("## "):
+            current = line[3:].split("(")[0].strip()
+            blocks[current] = []
+        elif line.strip() and current and not line.startswith("#"):
+            blocks[current].append(line.lstrip("- ").strip())
+    return [(name, seconds(" ".join(blocks.get(name, []))), limit)
+            for name, limit in LIMITS]
+
+
+def report(data, canon, script=None, used=None, refusal=None, template_cta=False,
+           source_text=None, extractor=""):
     facts = data.get("facts", [])
     source_id = data.get("source", {}).get("id", "")
     out = ["# отчёт", ""]
 
-    out += ["## нарушения канона в исходнике", ""]
-    src = source_violations(facts, canon)
+    where = "по всей статье" if source_text else "по цитатам отобранных фактов"
+    out += [f"## нарушения канона в исходнике ({where})", ""]
+    src = (lens.check(source_text, canon, document_level=False)
+           if source_text else source_violations(facts, canon))
     if src:
         for i, v in enumerate(src, 1):
             out.append(f"{i}. п.{v.point} {v.message} — «{v.quote}»")
@@ -138,6 +209,15 @@ def report(data, canon, script=None, used=None, refusal=None, template_cta=False
     out.append("")
 
     if script is not None:
+        out += ["## хронометраж", ""]
+        total = 0.0
+        for name, secs, limit in timing(script):
+            total += secs
+            mark = "" if secs <= limit else f" — превышение, лимит {limit} с"
+            out.append(f"- {name}: {secs} с{mark}")
+        out.append(f"- всего: {round(total, 1)} с при темпе {WORDS_PER_SEC} слова в секунду")
+        out.append("")
+
         out += ["## самопроверка сценария", ""]
         own = lens.check(USED_SECTION.sub("", script), canon)
         if own:
@@ -145,7 +225,8 @@ def report(data, canon, script=None, used=None, refusal=None, template_cta=False
                 out.append(f"- п.{v.point} {v.message} — «{v.quote}»")
         else:
             out.append(f"канон пройден, {len(used)} фактов использовано")
-        out.append(f"- движок канона: {lens.ENGINE}")
+        out.append(f"- движок канона: {lens.ENGINE}"
+                   + (f" · добытчик фактов: {extractor}" if extractor else ""))
         if template_cta:
             out.append("- CTA шаблонный: в сырье нет факта с kind=action")
         out.append("")
