@@ -192,13 +192,20 @@ def parse_source(path):
 
 def ask_model(article, want, timeout):
     result = subprocess.run(
+        # `--tools ""` роняло вызов: код возврата 0, stdout пустой (None).
+        # Флаг убран — инструменты и не нужны, модель только читает текст.
         ["claude", "-p", PROMPT.format(article=article, want=want),
-         "--tools", "", "--output-format", "text"],
-        capture_output=True, text=True, timeout=timeout,
+         "--output-format", "text"],
+        # на Windows text=True берёт кодировку консоли (cp1251) и падает на
+        # первом же длинном тире — кодировку задаём явно
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout,
     )
     if result.returncode != 0:
         raise RuntimeError((result.stderr or "claude вернул ненулевой код").strip()[:300])
-    out = result.stdout.strip()
+    out = (result.stdout or "").strip()
+    if not out:
+        raise RuntimeError("claude вернул пустой ответ")
     out = re.sub(r"^```(?:json)?\s*|\s*```$", "", out).strip()
     start, end = out.find("["), out.rfind("]")
     if start < 0 or end < 0:

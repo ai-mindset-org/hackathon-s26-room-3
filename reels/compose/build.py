@@ -117,8 +117,11 @@ def pick(facts, title=""):
 
     # Факт, чьи числа целиком уже прозвучали, ничего не добавляет: три пункта
     # про одни и те же 80 уроков читаются как повтор, а не как три факта.
+    # Бюджет сути считается от целевого коридора, а не от собственного лимита:
+    # цель — уложить ролик в 15-20 секунд целиком, а не набить суть под потолок.
     seen, seen_words = numbers_of(hook), content_words(hook)
-    body, budget = [], LIMITS[1][1]
+    reserve = seconds(fit_hook(hook["text"])) + seconds(FALLBACK_CTA)
+    body, budget = [], min(LIMITS[1][1], TARGET[1] - reserve)
     for fact in candidates:
         if repeats(fact, seen, seen_words):
             continue
