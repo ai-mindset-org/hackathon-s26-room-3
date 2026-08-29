@@ -158,20 +158,26 @@ def spread_out(facts, cap):
     а не выбрасывается: объём сохраняем, а наверху — разные вещи.
     """
     picked, deferred = [], []
-    used_numbers, used_words = set(), []
+    used_numbers, seen_pairs = set(), []
     for fact in facts:
         nums = numbers_of(fact)
         words = content_words(fact)
-        same_numbers = bool(nums) and nums <= used_numbers
-        same_words = any(
-            len(words & seen) / max(len(words | seen), 1) > 0.6 for seen in used_words
-        )
-        if same_numbers or same_words:
+        # все числа уже прозвучали — факт ничего не добавляет
+        repeat = bool(nums) and nums <= used_numbers
+        for prev_nums, prev_words in seen_pairs:
+            if repeat:
+                break
+            # «за 15 минут» и «за 15-20 минут» — числа формально разные, но факт
+            # один: ловим по доле общих чисел вместе с общей темой
+            shared = len(nums & prev_nums) / len(nums) if nums else 0
+            topic = len(words & prev_words) / max(len(words | prev_words), 1)
+            repeat = (shared >= 0.5 and topic > 0.3) or topic > 0.6
+        if repeat:
             deferred.append(fact)
             continue
         picked.append(fact)
         used_numbers |= nums
-        used_words.append(words)
+        seen_pairs.append((nums, words))
     return (picked + deferred)[:cap]
 
 
