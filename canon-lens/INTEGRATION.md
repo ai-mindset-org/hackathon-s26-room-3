@@ -48,7 +48,6 @@ python canon-lens/lens/lens_map.py <файл> --violations v.json -o map.html
 |---|---|
 | `canon.md` | synthetic, под приёмку `examples/` |
 | `canon.sostav.md` | клубный блог AI Practiq (лид, кейс, FAQ, SEO-ключ, 1–2 CTA на клуб) |
-| `canon.personal-p1.md` | личный блог Тимура фаза 1 — **запрет упоминания клуба** |
 
 Смена канона = аргумент `--canon`, код не меняется. Новый вид правила = функция
 в `canon_lens/check.py` (`_DISPATCH`); всё прочее — данными в `.md`.
