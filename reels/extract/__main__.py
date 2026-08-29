@@ -134,6 +134,47 @@ def score(fact):
     return s
 
 
+def numbers_of(fact):
+    """Числа факта: цифрами и словами. «80 уроков за 15 минут» -> {'80','15'}."""
+    found = set(re.findall(r"\d+", fact["quote"]))
+    for word in re.findall(r"[а-яё]+", fact["quote"].lower()):
+        if word in WORD_NUMBERS:
+            found.add(WORD_NUMBERS[word])
+    if fact.get("value"):
+        found.update(re.findall(r"\d+", fact["value"]))
+    return found
+
+
+def content_words(fact):
+    return {w for w in re.findall(r"[а-яёa-z]{4,}", fact["text"].lower())}
+
+
+def spread_out(facts, cap):
+    """Разводит пересекающиеся факты.
+
+    Три факта про одни и те же 80 уроков и 15 минут — это один факт, сказанный
+    трижды: сборщик поставит их подряд в «суть», и ролик будет топтаться на
+    месте. Поэтому факт, чьи числа уже целиком прозвучали, уходит вниз списка,
+    а не выбрасывается: объём сохраняем, а наверху — разные вещи.
+    """
+    picked, deferred = [], []
+    used_numbers, used_words = set(), []
+    for fact in facts:
+        nums = numbers_of(fact)
+        words = content_words(fact)
+        same_numbers = bool(nums) and nums <= used_numbers
+        same_words = any(
+            len(words & seen) / max(len(words | seen), 1) > 0.6 for seen in used_words
+        )
+        if same_numbers or same_words:
+            deferred.append(fact)
+            continue
+        picked.append(fact)
+        used_numbers |= nums
+        used_words.append(words)
+    return (picked + deferred)[:cap]
+
+
 def parse_source(path):
     text = path.read_text(encoding="utf-8")
     title = next((ln[2:].strip() for ln in text.splitlines() if ln.startswith("# ")), path.stem)
@@ -210,7 +251,7 @@ def build_facts(raw_facts, text, cap, verbose):
             unique.append(f)
 
     unique.sort(key=score, reverse=True)
-    kept = unique[:cap]
+    kept = spread_out(unique, cap)
     # ролику нужен финал: если action не прошёл по рангу, вернём лучший
     if not any(f["kind"] == "action" for f in kept):
         action = next((f for f in unique if f["kind"] == "action"), None)
