@@ -14,6 +14,11 @@
 import re
 
 QUOTED = re.compile(r"[«\"]([^»\"]+)[»\"]")
+
+# Обрезка слова до основы ловит однокоренные формы, но «данный» и «данные»
+# — разные слова с общей основой, и второе нейтрально. Такие формы исключаем
+# явно, иначе линтер объявляет нарушением обычное «данные по конверсии».
+AMBIGUOUS = {"данные", "данных", "данными", "данным"}
 EMOJI = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F2FF⬀-⯿️]"
 )
@@ -119,15 +124,17 @@ def check(text, canon, skip=()):
             for m in rx.finditer(text):
                 add("antithesis", "антитеза", _where(text, m.span()))
 
-    for word in canon.banned_words:
-        for m in re.finditer(re.escape(word[:-2] if len(word) > 4 else word), text, re.I):
-            add("banned", f"запрещённое слово «{word}»", _where(text, m.span()))
-            break
+    def by_stem(words, key, label):
+        for word in words:
+            stem = word[:-2] if len(word) > 4 else word
+            for m in re.finditer(r"\b" + re.escape(stem) + r"\w*", text, re.I):
+                if m.group(0).lower() in AMBIGUOUS:
+                    continue
+                add(key, f"{label} «{word}»", _where(text, m.span()))
+                break
 
-    for word in canon.canceleritis:
-        for m in re.finditer(re.escape(word[:-2] if len(word) > 4 else word), text, re.I):
-            add("tone", f"канцелярит «{word}»", _where(text, m.span()))
-            break
+    by_stem(canon.banned_words, "banned", "запрещённое слово")
+    by_stem(canon.canceleritis, "tone", "канцелярит")
 
     if canon.max_paragraph_lines:
         for para in re.split(r"\n\s*\n", text):
