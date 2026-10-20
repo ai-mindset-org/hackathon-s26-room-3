@@ -1,5 +1,9 @@
 # Комната 3 · Контент-конвейер по канону
 
+<!-- aim-public-links:start -->
+[Лабы AI Mindset](https://aimindset.org/?utm_source=website&utm_medium=article&utm_campaign=start&utm_content=github-hackathon-s26-room-3#learning) · [База знаний](https://base.aimindset.org/?utm_source=website&utm_medium=article&utm_campaign=start&utm_content=github-hackathon-s26-room-3)
+<!-- aim-public-links:end -->
+
 Хакатон AI Mindset S26 «Чужая боль» · 29.08.2026 · 10:00–14:00 CET
 
 ## Задача
